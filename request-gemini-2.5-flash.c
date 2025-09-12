@@ -110,43 +110,40 @@ message *m_ptr;					/* request message pointer */
  *===========================================================================*/
 int do_down(message *m_ptr)
 {
-  register struct rproc *rp;
-  int s;
+  struct rproc *rp;
+  int status;
   char label[RS_MAX_LABEL_LEN];
 
-  /* Copy label. */
-  s = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
+  status = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
       m_ptr->m_rs_req.len, label, sizeof(label));
-  if(s != OK) {
-      return s;
+  if (status != OK) {
+      return status;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
-  if(!rp) {
-      if(rs_verbose)
+  if (rp == NULL) {
+      if (rs_verbose) {
           printf("RS: do_down: service '%s' not found\n", label);
-      return(ESRCH);
+      }
+      return ESRCH;
   }
 
-  /* Check if the call can be allowed. */
-  if((s = check_call_permission(m_ptr->m_source, RS_DOWN, rp)) != OK)
-      return s;
+  status = check_call_permission(m_ptr->m_source, RS_DOWN, rp);
+  if (status != OK) {
+      return status;
+  }
 
-  /* Stop service. */
   if (rp->r_flags & RS_TERMINATED) {
-        /* A recovery script is requesting us to bring down the service.
-         * The service is already gone, simply perform cleanup.
-         */
-        if(rs_verbose)
-            printf("RS: recovery script performs service down...\n");
+      if (rs_verbose) {
+          printf("RS: recovery script performs service down...\n");
+      }
   	unpublish_service(rp);
   	cleanup_service(rp);
-    	return(OK);
+    	return OK;
   }
-  stop_service(rp,RS_EXITING);
 
-  /* Late reply - send a reply when service dies. */
+  stop_service(rp, RS_EXITING);
+
   rp->r_flags |= RS_LATEREPLY;
   rp->r_caller = m_ptr->m_source;
   rp->r_caller_request = RS_DOWN;
@@ -162,42 +159,42 @@ int do_restart(message *m_ptr)
   struct rproc *rp;
   int s, r;
   char label[RS_MAX_LABEL_LEN];
-  char script[MAX_SCRIPT_LEN];
+  char script_buffer[MAX_SCRIPT_LEN];
 
-  /* Copy label. */
   s = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
       m_ptr->m_rs_req.len, label, sizeof(label));
-  if(s != OK) {
+  if (s != OK) {
       return s;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
-  if(!rp) {
-      if(rs_verbose)
+  if (!rp) {
+      if (rs_verbose)
           printf("RS: do_restart: service '%s' not found\n", label);
-      return(ESRCH);
+      return ESRCH;
   }
 
-  /* Check if the call can be allowed. */
-  if((r = check_call_permission(m_ptr->m_source, RS_RESTART, rp)) != OK)
+  if ((r = check_call_permission(m_ptr->m_source, RS_RESTART, rp)) != OK)
       return r;
 
-  /* We can only be asked to restart a service from a recovery script. */
-  if (! (rp->r_flags & RS_TERMINATED) ) {
-      if(rs_verbose)
+  if (!(rp->r_flags & RS_TERMINATED)) {
+      if (rs_verbose)
           printf("RS: %s is still running\n", srv_to_string(rp));
       return EBUSY;
   }
 
-  if(rs_verbose)
+  if (rs_verbose)
       printf("RS: recovery script performs service restart...\n");
 
-  /* Restart the service, but make sure we don't call the script again. */
-  strcpy(script, rp->r_script);
+  strncpy(script_buffer, rp->r_script, sizeof(script_buffer) - 1);
+  script_buffer[sizeof(script_buffer) - 1] = '\0';
+
   rp->r_script[0] = '\0';
+
   restart_service(rp);
-  strcpy(rp->r_script, script);
+
+  strncpy(rp->r_script, script_buffer, sizeof(rp->r_script) - 1);
+  rp->r_script[sizeof(rp->r_script) - 1] = '\0';
 
   return OK;
 }
@@ -208,40 +205,39 @@ int do_restart(message *m_ptr)
 int do_clone(message *m_ptr)
 {
   struct rproc *rp;
-  struct rprocpub *rpub;
-  int s, r;
+  int status;
   char label[RS_MAX_LABEL_LEN];
 
-  /* Copy label. */
-  s = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
+  status = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
       m_ptr->m_rs_req.len, label, sizeof(label));
-  if(s != OK) {
-      return s;
+  if (status != OK) {
+      return status;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
-  if(!rp) {
-      if(rs_verbose)
+  if (!rp) {
+      if (rs_verbose) {
           printf("RS: do_clone: service '%s' not found\n", label);
-      return(ESRCH);
+      }
+      return ESRCH;
   }
-  rpub = rp->r_pub;
 
-  /* Check if the call can be allowed. */
-  if((r = check_call_permission(m_ptr->m_source, RS_CLONE, rp)) != OK)
-      return r;
+  status = check_call_permission(m_ptr->m_source, RS_CLONE, rp);
+  if (status != OK) {
+      return status;
+  }
 
-  /* Don't clone if a replica is already available. */
-  if(rp->r_next_rp) {
+  if (rp->r_next_rp) {
       return EEXIST;
   }
 
-  /* Clone the service as requested. */
+  struct rprocpub *rpub = rp->r_pub;
   rpub->sys_flags |= SF_USE_REPL;
-  if ((r = clone_service(rp, RST_SYS_PROC, 0)) != OK) {
+
+  status = clone_service(rp, RST_SYS_PROC, 0);
+  if (status != OK) {
       rpub->sys_flags &= ~SF_USE_REPL;
-      return r;
+      return status;
   }
 
   return OK;
@@ -269,7 +265,7 @@ int do_unclone(message *m_ptr)
   if(!rp) {
       if(rs_verbose)
           printf("RS: do_unclone: service '%s' not found\n", label);
-      return(ESRCH);
+      return ESRCH;
   }
   rpub = rp->r_pub;
 
@@ -303,20 +299,17 @@ int do_edit(message *m_ptr)
   int r;
   char label[RS_MAX_LABEL_LEN];
 
-  /* Copy the request structure. */
   r = copy_rs_start(m_ptr->m_source, m_ptr->m_rs_req.addr, &rs_start);
   if (r != OK) {
       return r;
   }
 
-  /* Copy label. */
   r = copy_label(m_ptr->m_source, rs_start.rss_label.l_addr,
       rs_start.rss_label.l_len, label, sizeof(label));
   if(r != OK) {
       return r;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
   if(!rp) {
       if(rs_verbose)
@@ -325,52 +318,44 @@ int do_edit(message *m_ptr)
   }
   rpub = rp->r_pub;
 
-  /* Check if the call can be allowed. */
   if((r = check_call_permission(m_ptr->m_source, RS_EDIT, rp)) != OK)
       return r;
 
   if(rs_verbose)
       printf("RS: %s edits settings\n", srv_to_string(rp));
 
-  /* Synch the privilege structure with the kernel. */
   if ((r = sys_getpriv(&rp->r_priv, rpub->endpoint)) != OK) {
       printf("RS: do_edit: unable to synch privilege structure: %d\n", r);
       return r;
   }
 
-  /* Tell scheduler this process is finished */
   if ((r = sched_stop(rp->r_scheduler, rpub->endpoint)) != OK) {
       printf("RS: do_edit: scheduler won't give up process: %d\n", r);
       return r;
   }
 
-  /* Edit the slot as requested. */
   if((r = edit_slot(rp, &rs_start, m_ptr->m_source)) != OK) {
       printf("RS: do_edit: unable to edit the existing slot: %d\n", r);
       return r;
   }
 
-  /* Update privilege structure. */
   r = sys_privctl(rpub->endpoint, SYS_PRIV_UPDATE_SYS, &rp->r_priv);
   if(r != OK) {
       printf("RS: do_edit: unable to update privilege structure: %d\n", r);
       return r;
   }
 
-  /* Update VM calls. */
   if ((r = vm_set_priv(rpub->endpoint, &rpub->vm_call_mask[0],
     !!(rp->r_priv.s_flags & SYS_PROC))) != OK) {
-      printf("RS: do_edit: failed: %d\n", r);
+      printf("RS: do_edit: vm_set_priv failed: %d\n", r);
       return r;
   }
 
-  /* Reinitialize scheduling. */
   if ((r = sched_init_proc(rp)) != OK) {
       printf("RS: do_edit: unable to reinitialize scheduling: %d\n", r);
       return r;
   }
 
-  /* Cleanup old replicas and create a new one, if necessary. */
   if(rpub->sys_flags & SF_USE_REPL) {
       if(rp->r_next_rp) {
           cleanup_service(rp->r_next_rp);
@@ -389,35 +374,33 @@ int do_edit(message *m_ptr)
  *===========================================================================*/
 int do_refresh(message *m_ptr)
 {
-  register struct rproc *rp;
+  struct rproc *rp;
   int s;
   char label[RS_MAX_LABEL_LEN];
 
-  /* Copy label. */
   s = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
       m_ptr->m_rs_req.len, label, sizeof(label));
-  if(s != OK) {
+  if (s != OK) {
       return s;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
-  if(!rp) {
-      if(rs_verbose)
+  if (rp == NULL) {
+      if (rs_verbose) {
           printf("RS: do_refresh: service '%s' not found\n", label);
-      return(ESRCH);
+      }
+      return ESRCH;
   }
 
-  /* Check if the call can be allowed. */
-  if((s = check_call_permission(m_ptr->m_source, RS_REFRESH, rp)) != OK)
+  if ((s = check_call_permission(m_ptr->m_source, RS_REFRESH, rp)) != OK) {
       return s;
+  }
 
-  /* Refresh service. */
-  if(rs_verbose)
+  if (rs_verbose) {
       printf("RS: %s refreshing\n", srv_to_string(rp));
-  stop_service(rp,RS_REFRESHING);
+  }
+  stop_service(rp, RS_REFRESHING);
 
-  /* Late reply - send a reply when refresh completes. */
   rp->r_flags |= RS_LATEREPLY;
   rp->r_caller = m_ptr->m_source;
   rp->r_caller_request = RS_REFRESH;
@@ -430,30 +413,26 @@ int do_refresh(message *m_ptr)
  *===========================================================================*/
 int do_shutdown(message *m_ptr)
 {
-  int slot_nr;
-  struct rproc *rp;
-  int r;
+    if (m_ptr != NULL) {
+        int result_code;
+        if ((result_code = check_call_permission(m_ptr->m_source, RS_SHUTDOWN, NULL)) != OK) {
+            return result_code;
+        }
+    }
 
-  /* Check if the call can be allowed. */
-  if (m_ptr != NULL) {
-      if((r = check_call_permission(m_ptr->m_source, RS_SHUTDOWN, NULL)) != OK)
-          return r;
-  }
+    if (rs_verbose) {
+        printf("RS: shutting down...\n");
+    }
 
-  if(rs_verbose)
-      printf("RS: shutting down...\n");
+    shutting_down = 1;
 
-  /* Set flag to tell RS we are shutting down. */
-  shutting_down = TRUE;
-
-  /* Don't restart dead services. */
-  for (slot_nr = 0; slot_nr < NR_SYS_PROCS; slot_nr++) {
-      rp = &rproc[slot_nr];
-      if (rp->r_flags & RS_IN_USE) {
-          rp->r_flags |= RS_EXITING;
-      }
-  }
-  return(OK);
+    for (int slot_nr = 0; slot_nr < NR_SYS_PROCS; ++slot_nr) {
+        struct rproc *rp = &rproc[slot_nr];
+        if (rp->r_flags & RS_IN_USE) {
+            rp->r_flags |= RS_EXITING;
+        }
+    }
+    return OK;
 }
 
 /*===========================================================================*
@@ -462,11 +441,9 @@ int do_shutdown(message *m_ptr)
 int do_init_ready(message *m_ptr)
 {
   int who_p;
-  message m;
-  struct rproc *rp, *new_rp;
+  struct rproc *rp;
   struct rprocpub *rpub;
   int result;
-  int r;
 
   who_p = _ENDPOINT_P(m_ptr->m_source);
   result = m_ptr->m_rs_init.result;
@@ -474,7 +451,6 @@ int do_init_ready(message *m_ptr)
   rp = rproc_ptr[who_p];
   rpub = rp->r_pub;
 
-  /* Make sure the originating service was requested to initialize. */
   if(! (rp->r_flags & RS_INITIALIZING) ) {
       if(rs_verbose)
           printf("RS: do_init_ready: got unexpected init ready msg from %d\n",
@@ -482,16 +458,13 @@ int do_init_ready(message *m_ptr)
       return EINVAL;
   }
 
-  /* Check if something went wrong and the service failed to init.
-   * In that case, kill the service.
-   */
   if(result != OK) {
       if(rs_verbose)
           printf("RS: %s initialization error: %s\n", srv_to_string(rp),
               init_strerror(result));
       if (result == ERESTART && !SRV_IS_UPDATING(rp))
           rp->r_flags |= RS_REINCARNATE;
-      crash_service(rp); /* simulate crash */
+      crash_service(rp);
       rp->r_init_err = result;
       return EDONTREPLY;
   }
@@ -499,10 +472,6 @@ int do_init_ready(message *m_ptr)
   if(rs_verbose)
       printf("RS: %s initialized\n", srv_to_string(rp));
 
-  /* If updating, check if there is no service to update left. In that case,
-   * end the update process. If VM has completed initialization as part of
-   * multi-component live update, let the other services under update run now.
-   */
   if(SRV_IS_UPDATING(rp)) {
       rupdate.num_init_ready_pending--;
       rp->r_flags |= RS_INIT_DONE;
@@ -512,16 +481,15 @@ int do_init_ready(message *m_ptr)
       }
   }
   else {
-      /* Mark the slot as no longer initializing. */
+      message m;
+
       rp->r_flags &= ~RS_INITIALIZING;
       rp->r_check_tm = 0;
       rp->r_alive_tm = getticks();
     
-      /* Reply and unblock the service before doing anything else. */
       m.m_type = OK;
       reply(rpub->endpoint, rp, &m);
     
-      /* Finalize initialization. */
       end_srv_init(rp);
   }
 
@@ -533,17 +501,17 @@ int do_init_ready(message *m_ptr)
  *===========================================================================*/
 int do_update(message *m_ptr)
 {
-  struct rproc *rp;
-  struct rproc *trg_rp;
-  struct rproc *new_rp;
+  int s = OK;
+  struct rproc *rp = NULL;
+  struct rproc *trg_rp = NULL;
+  struct rproc *new_rp = NULL;
   struct rprocpub *rpub;
-  struct rprocupd *rpupd;
+  struct rprocupd *rpupd = NULL;
   struct rs_start rs_start;
-  int noblock, do_self_update, force_self_update, batch_mode, prepare_only;
-  int s;
   char label[RS_MAX_LABEL_LEN];
+  int noblock, do_self_update, force_self_update, batch_mode, prepare_only;
   int prepare_state, prepare_maxtime;
-  endpoint_t state_endpoint;
+  endpoint_t state_endpoint = NONE;
   int lu_flags = 0;
   int init_flags = 0;
   int allow_retries = 0;
@@ -551,14 +519,14 @@ int do_update(message *m_ptr)
   /* Copy the request structure. */
   s = copy_rs_start(m_ptr->m_source, m_ptr->m_rs_req.addr, &rs_start);
   if (s != OK) {
-      return s;
+      goto fail;
   }
 
   /* Copy label. */
   s = copy_label(m_ptr->m_source, rs_start.rss_label.l_addr,
       rs_start.rss_label.l_len, label, sizeof(label));
   if(s != OK) {
-      return s;
+      goto fail;
   }
 
   /* Lookup slot by label. */
@@ -566,7 +534,8 @@ int do_update(message *m_ptr)
   if(!rp) {
       if(rs_verbose)
           printf("RS: do_update: service '%s' not found\n", label);
-      return ESRCH;
+      s = ESRCH;
+      goto fail;
   }
   rpub = rp->r_pub;
 
@@ -576,77 +545,67 @@ int do_update(message *m_ptr)
   force_self_update = (rs_start.rss_flags & RSS_FORCE_SELF_LU);
   batch_mode = (rs_start.rss_flags & RSS_BATCH);
   prepare_only = (rs_start.rss_flags & RSS_PREPARE_ONLY_LU);
-  if(do_self_update || force_self_update) {
-      lu_flags |= SEF_LU_SELF;
-  }
-  if(prepare_only) {
-      lu_flags |= SEF_LU_PREPARE_ONLY;
-  }
-  if(rs_start.rss_flags & RSS_ASR_LU) {
-      lu_flags |= SEF_LU_ASR;
-  }
-  if(!prepare_only && (rs_start.rss_flags & RSS_DETACH)) {
-      lu_flags |= SEF_LU_DETACHED;
-  }
-  if(rs_start.rss_map_prealloc_bytes <= 0
-      && rpub->endpoint == VM_PROC_NR
-      && (((lu_flags & (SEF_LU_SELF|SEF_LU_ASR)) != SEF_LU_SELF) || rs_start.rss_flags & RSS_FORCE_INIT_ST)
-      && RS_VM_DEFAULT_MAP_PREALLOC_LEN > 0) {
+
+  if(do_self_update || force_self_update) { lu_flags |= SEF_LU_SELF; }
+  if(prepare_only) { lu_flags |= SEF_LU_PREPARE_ONLY; }
+  if(rs_start.rss_flags & RSS_ASR_LU) { lu_flags |= SEF_LU_ASR; }
+  if(!prepare_only && (rs_start.rss_flags & RSS_DETACH)) { lu_flags |= SEF_LU_DETACHED; }
+
+  /* Determine if VM requires default mmap preallocation. */
+  int is_vm_proc = (rpub->endpoint == VM_PROC_NR);
+  int is_non_identical_vm_update = (is_vm_proc &&
+                                    (((lu_flags & (SEF_LU_SELF | SEF_LU_ASR)) != SEF_LU_SELF) ||
+                                     (rs_start.rss_flags & RSS_FORCE_INIT_ST)));
+
+  if(rs_start.rss_map_prealloc_bytes <= 0 && is_non_identical_vm_update && RS_VM_DEFAULT_MAP_PREALLOC_LEN > 0) {
       /* Give VM some mmapped regions by default on non-identical updates.*/
       rs_start.rss_map_prealloc_bytes = RS_VM_DEFAULT_MAP_PREALLOC_LEN;
       if(rs_verbose)
           printf("RS: %s gets %ld default mmap bytes\n", srv_to_string(rp),
               rs_start.rss_map_prealloc_bytes);
   }
+
   if((rs_start.rss_flags & RSS_NOMMAP_LU) || rs_start.rss_map_prealloc_bytes) {
       /* Don't inherit mmapped regions at update time if requested or if
-       * mmap preallocation is used.
-       */
+       * mmap preallocation is used. */
       lu_flags |= SEF_LU_NOMMAP;
   }
-  if(rs_start.rss_flags & RSS_FORCE_INIT_CRASH) {
-      init_flags |= SEF_INIT_CRASH;
-  }
-  if(rs_start.rss_flags & RSS_FORCE_INIT_FAIL) {
-      init_flags |= SEF_INIT_FAIL;
-  }
-  if(rs_start.rss_flags & RSS_FORCE_INIT_TIMEOUT) {
-      init_flags |= SEF_INIT_TIMEOUT;
-  }
-  if(rs_start.rss_flags & RSS_FORCE_INIT_DEFCB) {
-      init_flags |= SEF_INIT_DEFCB;
-  }
-  if(rs_start.rss_flags & RSS_FORCE_INIT_ST) {
-      init_flags |= SEF_INIT_ST;
-  }
+
+  if(rs_start.rss_flags & RSS_FORCE_INIT_CRASH) { init_flags |= SEF_INIT_CRASH; }
+  if(rs_start.rss_flags & RSS_FORCE_INIT_FAIL) { init_flags |= SEF_INIT_FAIL; }
+  if(rs_start.rss_flags & RSS_FORCE_INIT_TIMEOUT) { init_flags |= SEF_INIT_TIMEOUT; }
+  if(rs_start.rss_flags & RSS_FORCE_INIT_DEFCB) { init_flags |= SEF_INIT_DEFCB; }
+  if(rs_start.rss_flags & RSS_FORCE_INIT_ST) { init_flags |= SEF_INIT_ST; }
   init_flags |= lu_flags;
 
   /* Lookup target label (if any). */
-  trg_rp = NULL;
-  state_endpoint = NONE;
   if(rs_start.rss_trg_label.l_len > 0) {
       s = copy_label(m_ptr->m_source, rs_start.rss_trg_label.l_addr,
           rs_start.rss_trg_label.l_len, label, sizeof(label));
       if(s != OK) {
-          return s;
+          goto fail;
       }
       trg_rp = lookup_slot_by_label(label);
       if(!trg_rp) {
           if(rs_verbose)
               printf("RS: do_update: target service '%s' not found\n", label);
-          return ESRCH;
+          s = ESRCH;
+          goto fail;
       }
       state_endpoint = trg_rp->r_pub->endpoint;
   }
 
   /* Check if the call can be allowed. */
-  if((s = check_call_permission(m_ptr->m_source, RS_UPDATE, rp)) != OK)
-      return s;
+  s = check_call_permission(m_ptr->m_source, RS_UPDATE, rp);
+  if(s != OK) {
+      goto fail;
+  }
 
   /* Retrieve live update state. */
   prepare_state = m_ptr->m_rs_update.state;
   if(prepare_state == SEF_LU_STATE_NULL) {
-      return(EINVAL);
+      s = EINVAL;
+      goto fail;
   }
 
   /* Retrieve prepare max time. */
@@ -658,34 +617,39 @@ int do_update(message *m_ptr)
   /* Make sure we are not already updating. */
   if(RUPDATE_IS_UPDATING()) {
       printf("RS: an update is already in progress\n");
-      return EBUSY;
+      s = EBUSY;
+      goto fail;
   }
 
   /* If an update is already scheduled, check constraints. */
   if(RUPDATE_IS_UPD_SCHEDULED()) {
       if(!batch_mode) {
           printf("RS: an update is already scheduled, cannot start a new one\n");
-          return EBUSY;
+          s = EBUSY;
+          goto fail;
       }
       if(SRV_IS_UPD_SCHEDULED(rp)) {
           printf("RS: the specified process is already part of the currently scheduled update\n");
-          return EINVAL;
+          s = EINVAL;
+          goto fail;
       }
   }
 
-  /* Prepare-only update for VM, PM, and VFS is only supported with an unreachable state. */
-  if(prepare_only
-      && (rp->r_pub->endpoint == VM_PROC_NR || rp->r_pub->endpoint == PM_PROC_NR || rp->r_pub->endpoint == VFS_PROC_NR)) {
+  /* Prepare-only update constraints for critical system processes. */
+  int is_critical_sys_proc = (rpub->endpoint == VM_PROC_NR || rpub->endpoint == PM_PROC_NR || rpub->endpoint == VFS_PROC_NR);
+  if(prepare_only && is_critical_sys_proc) {
       if(prepare_state != SEF_LU_STATE_UNREACHABLE) {
           printf("RS: prepare-only update for VM, PM and VFS is only supported with state %d\n", SEF_LU_STATE_UNREACHABLE);
-          return EINVAL;
+          s = EINVAL;
+          goto fail;
       }
   }
 
   /* Prepare-only update for RS is not supported. */
-  if(prepare_only && rp->r_pub->endpoint == RS_PROC_NR) {
+  if(prepare_only && rpub->endpoint == RS_PROC_NR) {
       printf("RS: prepare-only update for RS is not supported\n");
-      return EINVAL;
+      s = EINVAL;
+      goto fail;
   }
 
   /* Initialize update descriptor. */
@@ -708,7 +672,7 @@ int do_update(message *m_ptr)
           s = clone_service(rp, LU_SYS_PROC, rpupd->init_flags);
           if(s != OK) {
               printf("RS: do_update: unable to clone service: %d\n", s);
-              return s;
+              goto fail_cleanup_resources;
           }
           new_rp = rp->r_new_rp;
       }
@@ -721,14 +685,16 @@ int do_update(message *m_ptr)
           s = alloc_slot(&new_rp);
           if(s != OK) {
               printf("RS: do_update: unable to allocate a new slot: %d\n", s);
-              return s;
+              goto fail_cleanup_resources;
           }
     
           /* Initialize the slot as requested. */
           s = init_slot(new_rp, &rs_start, m_ptr->m_source);
           if(s != OK) {
               printf("RS: do_update: unable to init the new slot: %d\n", s);
-              return s;
+              cleanup_service(new_rp); /* Crucial: ensures partially initialized rproc is cleaned. */
+              new_rp = NULL; /* Indicate new_rp is no longer valid after cleanup */
+              goto fail_cleanup_resources;
           }
     
           /* Let the new version inherit defaults from the old one. */
@@ -744,7 +710,9 @@ int do_update(message *m_ptr)
           s = create_service(new_rp);
           if(s != OK) {
               printf("RS: do_update: unable to create a new service: %d\n", s);
-              return s;
+              cleanup_service(new_rp);
+              new_rp = NULL; /* Indicate new_rp is no longer valid after cleanup */
+              goto fail_cleanup_resources;
           }
       }
 
@@ -753,35 +721,26 @@ int do_update(message *m_ptr)
           state_endpoint = new_rp->r_pub->endpoint;
       }
 
-      /* If RS is updating, set up signal managers for the new instance.
-       * The current RS instance must be made the backup signal manager to
-       * support rollback in case of a crash during initialization.
-       */
+      /* If RS is updating, set up signal managers for the new instance. */
       if(rp->r_priv.s_flags & ROOT_SYS_PROC) {
           s = update_sig_mgrs(new_rp, SELF, new_rp->r_pub->endpoint);
           if(s != OK) {
-              cleanup_service(new_rp);
-              return s;
+              goto fail_cleanup_resources;
           }
       }
 
       /* Preallocate heap regions if requested. */
-      if(rs_start.rss_heap_prealloc_bytes < 0) {
-          rs_start.rss_heap_prealloc_bytes = 0;
-      }
+      if(rs_start.rss_heap_prealloc_bytes < 0) { rs_start.rss_heap_prealloc_bytes = 0; }
       if(rs_start.rss_heap_prealloc_bytes) {
-          size_t len;
+          size_t len = rs_start.rss_heap_prealloc_bytes;
           if(rs_verbose)
               printf("RS: %s preallocating %ld heap bytes\n", srv_to_string(new_rp),
                   rs_start.rss_heap_prealloc_bytes);
 
-          len = rs_start.rss_heap_prealloc_bytes;
-          s = vm_memctl(new_rp->r_pub->endpoint, VM_RS_MEM_HEAP_PREALLOC,
-              NULL, &len);
+          s = vm_memctl(new_rp->r_pub->endpoint, VM_RS_MEM_HEAP_PREALLOC, NULL, &len);
           if(s != OK) {
               printf("vm_memctl(VM_RS_MEM_HEAP_PREALLOC) failed: %d\n", s);
-              cleanup_service(new_rp);
-              return s;
+              goto fail_cleanup_resources;
           }
           if(rp->r_priv.s_flags & ROOT_SYS_PROC) {
               vm_memctl(new_rp->r_pub->endpoint, VM_RS_MEM_PIN, 0, 0);
@@ -789,9 +748,7 @@ int do_update(message *m_ptr)
       }
 
       /* Preallocate mmapped regions if requested. */
-      if(rs_start.rss_map_prealloc_bytes < 0) {
-          rs_start.rss_map_prealloc_bytes = 0;
-      }
+      if(rs_start.rss_map_prealloc_bytes < 0) { rs_start.rss_map_prealloc_bytes = 0; }
       if(rs_start.rss_map_prealloc_bytes) {
           void *addr = NULL;
           if(rs_verbose)
@@ -799,12 +756,10 @@ int do_update(message *m_ptr)
                   rs_start.rss_map_prealloc_bytes);
 
           new_rp->r_map_prealloc_len = rs_start.rss_map_prealloc_bytes;
-          s = vm_memctl(new_rp->r_pub->endpoint, VM_RS_MEM_MAP_PREALLOC,
-              &addr, &new_rp->r_map_prealloc_len);
+          s = vm_memctl(new_rp->r_pub->endpoint, VM_RS_MEM_MAP_PREALLOC, &addr, &new_rp->r_map_prealloc_len);
           if(s != OK) {
               printf("vm_memctl(VM_RS_MEM_MAP_PREALLOC) failed: %d\n", s);
-              cleanup_service(new_rp);
-              return s;
+              goto fail_cleanup_resources;
           }
           new_rp->r_map_prealloc_addr = (vir_bytes) addr;
       }
@@ -813,8 +768,7 @@ int do_update(message *m_ptr)
   /* Process state data. */
   s = init_state_data(m_ptr->m_source, prepare_state, &rs_start.rss_state_data, &rpupd->prepare_state_data);
   if(s != OK) {
-      rupdate_upd_clear(rpupd);
-      return s;
+      goto fail_cleanup_resources;
   }
 
   /* Create update grants. */
@@ -823,16 +777,16 @@ int do_update(message *m_ptr)
       rpupd->prepare_state_data_gid = cpf_grant_direct(rpub->endpoint, (vir_bytes) state_data,
           state_data->size, CPF_READ);
       if(rpupd->prepare_state_data_gid == GRANT_INVALID) {
-          rupdate_upd_clear(rpupd);
-          return ENOMEM;
+          s = ENOMEM;
+          goto fail_cleanup_resources;
       }
       state_data->ipcf_els_gid = GRANT_INVALID;
       if(state_data->ipcf_els) {
           state_data->ipcf_els_gid = (int) cpf_grant_direct(rpub->endpoint, (vir_bytes) state_data->ipcf_els,
               state_data->ipcf_els_size, CPF_READ);
           if(state_data->ipcf_els_gid == GRANT_INVALID) {
-              rupdate_upd_clear(rpupd);
-              return ENOMEM;
+              s = ENOMEM;
+              goto fail_cleanup_resources;
           }
       }
       state_data->eval_gid = GRANT_INVALID;
@@ -840,8 +794,8 @@ int do_update(message *m_ptr)
           state_data->eval_gid = (int) cpf_grant_direct(rpub->endpoint, (vir_bytes) state_data->eval_addr,
               state_data->eval_len, CPF_READ);
           if(state_data->eval_gid == GRANT_INVALID) {
-              rupdate_upd_clear(rpupd);
-              return ENOMEM;
+              s = ENOMEM;
+              goto fail_cleanup_resources;
           }
       }
   }
@@ -868,7 +822,7 @@ int do_update(message *m_ptr)
       return OK;
   }
   if(s != OK) {
-      return s;
+      goto fail;
   }
 
   /* Unblock the caller immediately if requested. */
@@ -882,6 +836,19 @@ int do_update(message *m_ptr)
   rupdate.last_rpupd->rp->r_caller_request = RS_UPDATE;
 
   return EDONTREPLY;
+
+fail_cleanup_resources:
+    /* Clean up allocated resources if an error occurred after rpupd was initialized
+     * or new_rp was created. */
+    if (rpupd != NULL) {
+        rupdate_upd_clear(rpupd);
+    }
+    if (new_rp != NULL) {
+        cleanup_service(new_rp);
+    }
+    /* Fall through to generic failure handling. */
+fail:
+  return s;
 }
 
 /*===========================================================================*
@@ -890,33 +857,27 @@ int do_update(message *m_ptr)
 int do_upd_ready(message *m_ptr)
 {
   struct rproc *rp;
-  struct rprocupd *prev_rpupd, *rpupd;
-  int who_p;
-  int result;
-  int is_rs;
-  int i;
+  struct rprocupd *current_update_proc;
+  int source_proc_id;
+  int update_result;
 
-  who_p = _ENDPOINT_P(m_ptr->m_source);
-  rp = rproc_ptr[who_p];
-  result = m_ptr->m_rs_update.result;
+  source_proc_id = _ENDPOINT_P(m_ptr->m_source);
+  rp = rproc_ptr[source_proc_id];
+  update_result = m_ptr->m_rs_update.result;
 
-  /* Make sure the originating service was requested to prepare for update. */
-  rpupd = rupdate.curr_rpupd;
-  if(!rpupd || rp != rpupd->rp || RUPDATE_IS_INITIALIZING()) {
+  current_update_proc = rupdate.curr_rpupd;
+  if(!current_update_proc || rp != current_update_proc->rp || RUPDATE_IS_INITIALIZING()) {
       if(rs_verbose)
           printf("RS: %s sent late/unexpected update ready msg\n",
               srv_to_string(rp));
       return EINVAL;
   }
+
   rp->r_flags |= RS_PREPARE_DONE;
 
-  /* Check if something went wrong and the service failed to prepare
-   * for the update. In that case, end the update process. The old version will
-   * be replied to and continue executing.
-   */
-  if(result != OK) {
-      printf("RS: update failed: %s\n", lu_strerror(result));
-      end_update(result, RS_REPLY);
+  if(update_result != OK) {
+      printf("RS: update failed: %s\n", lu_strerror(update_result));
+      end_update(update_result, RS_REPLY);
 
       return EDONTREPLY;
   }
@@ -924,14 +885,10 @@ int do_upd_ready(message *m_ptr)
   if(rs_verbose)
       printf("RS: %s ready to update\n", srv_to_string(rp));
 
-  /* If this is a multi-component update and this is not the last service
-   * in the update, request the next process to update.
-   */
   if(start_update_prepare_next() != NULL) {
       return EDONTREPLY;
   }
 
-  /* Now perform the update and request each new instance to initialize. */
   start_update();
 
   return EDONTREPLY;
@@ -1050,39 +1007,45 @@ message *m_ptr;
  *===========================================================================*/
 void do_sigchld()
 {
-/* PM informed us that there are dead children to cleanup. Go get them. */
   pid_t pid;
   int status;
   struct rproc *rp;
-  struct rproc **rps;
-  int i, nr_rps, found;
+  struct rproc **rps_array;
+  int i, nr_rps;
+  int found_updating_instance = 0;
 
-  if(rs_verbose)
+  if (rs_verbose) {
      printf("RS: got SIGCHLD signal, cleaning up dead children\n");
+  }
 
-  while ( (pid = waitpid(-1, &status, WNOHANG)) != 0 ) {
-      rp = lookup_slot_by_pid(pid);
-      if(rp != NULL) {
-
-          if(rs_verbose)
-              printf("RS: %s exited via another signal manager\n",
-                  srv_to_string(rp));
-
-          /* The slot is still there. This means RS is not the signal
-           * manager assigned to the process. Ignore the event but
-           * free slots for all the service instances and send a late
-           * reply if necessary.
-           */
-          found = 0;
-          get_service_instances(rp, &rps, &nr_rps);
-          for(i=0;i<nr_rps;i++) {
-              if(SRV_IS_UPDATING(rps[i])) {
-                  rps[i]->r_flags &= ~(RS_UPDATING|RS_PREPARE_DONE|RS_INIT_DONE|RS_INIT_PENDING);
-                  found = 1;
+  while ((pid = waitpid(-1, &status, WNOHANG)) != 0) {
+      if (pid == -1) {
+          if (errno != ECHILD) {
+              if (rs_verbose) {
+                  printf("RS: waitpid failed with error %d\n", errno);
               }
-              free_slot(rps[i]);
           }
-          if(found) {
+          break;
+      }
+
+      rp = lookup_slot_by_pid(pid);
+      if (rp != NULL) {
+          if (rs_verbose) {
+              printf("RS: %s exited via another signal manager\n", srv_to_string(rp));
+          }
+
+          found_updating_instance = 0;
+          get_service_instances(rp, &rps_array, &nr_rps);
+
+          for (i = 0; i < nr_rps; i++) {
+              if (SRV_IS_UPDATING(rps_array[i])) {
+                  rps_array[i]->r_flags &= ~(RS_UPDATING | RS_PREPARE_DONE | RS_INIT_DONE | RS_INIT_PENDING);
+                  found_updating_instance = 1;
+              }
+              free_slot(rps_array[i]);
+          }
+
+          if (found_updating_instance) {
               rupdate_clear_upds();
           }
       }
@@ -1181,46 +1144,50 @@ message *m_ptr;
 int do_sysctl(message *m_ptr)
 {
 	int request_type = m_ptr->m_rs_req.subtype;
-	int r, allow_retries = 1;
+	int result;
+
 	switch(request_type) {
 		case RS_SYSCTL_SRV_STATUS:
 			print_services_status();
-		break;
+			return OK;
+
 		case RS_SYSCTL_UPD_START:
 		case RS_SYSCTL_UPD_RUN:
-			r = start_update_prepare(allow_retries);
+			result = start_update_prepare(1); /* 1 for allow_retries */
 			print_update_status();
-			if(r != OK) {
-			    if(r == ESRCH) {
-			        /* We are done already. */
-			         r = OK;
-			    }
-			    return r;
+
+			if (result == ESRCH) {
+				/* Update procedure is already done; treat as success. */
+				return OK;
 			}
-			if(request_type == RS_SYSCTL_UPD_START) {
-			    return OK;
+			if (result != OK) {
+				/* An actual error occurred during preparation. */
+				return result;
 			}
-                        /* Send a reply when done. */
-                        rupdate.last_rpupd->rp->r_flags |= RS_LATEREPLY;
-                        rupdate.last_rpupd->rp->r_caller = m_ptr->m_source;
-                        rupdate.last_rpupd->rp->r_caller_request = RS_UPDATE;
+
+			/* If preparation was OK, handle based on specific request type. */
+			if (request_type == RS_SYSCTL_UPD_START) {
+				return OK;
+			}
+			/* Else, request_type is RS_SYSCTL_UPD_RUN: setup for late reply. */
+			rupdate.last_rpupd->rp->r_flags |= RS_LATEREPLY;
+			rupdate.last_rpupd->rp->r_caller = m_ptr->m_source;
+			rupdate.last_rpupd->rp->r_caller_request = RS_UPDATE;
 			return EDONTREPLY;
-		break;
+
 		case RS_SYSCTL_UPD_STOP:
-			r = abort_update_proc(EINTR);
+			result = abort_update_proc(EINTR);
 			print_update_status();
-			return r;
-		break;
+			return result;
+
 		case RS_SYSCTL_UPD_STATUS:
 			print_update_status();
-		break;
+			return OK;
+
 		default:
 			printf("RS: bad sysctl type\n");
 			return EINVAL;
-		break;
 	}
-
-	return OK;
 }
 
 /*===========================================================================*
@@ -1229,34 +1196,31 @@ int do_sysctl(message *m_ptr)
 int do_fi(message *m_ptr)
 {
   struct rproc *rp;
-  struct rprocpub *rpub;
-  int s, r;
+  int status;
   char label[RS_MAX_LABEL_LEN];
 
-  /* Copy label. */
-  s = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
+  status = copy_label(m_ptr->m_source, m_ptr->m_rs_req.addr,
       m_ptr->m_rs_req.len, label, sizeof(label));
-  if(s != OK) {
-      return s;
+  if (status != OK) {
+      return status;
   }
 
-  /* Lookup slot by label. */
   rp = lookup_slot_by_label(label);
-  if(!rp) {
-      if(rs_verbose)
+  if (!rp) {
+      if (rs_verbose) {
           printf("RS: do_fi: service '%s' not found\n", label);
-      return(ESRCH);
+      }
+      return ESRCH;
   }
-  rpub = rp->r_pub;
 
-  /* Check if the call can be allowed. */
-  if((r = check_call_permission(m_ptr->m_source, RS_FI, rp)) != OK)
-      return r;
+  status = check_call_permission(m_ptr->m_source, RS_FI, rp);
+  if (status != OK) {
+      return status;
+  }
 
-  /* Inject fault into the service as requested. */
-  s = fi_service(rp);
+  status = fi_service(rp);
 
-  return s;
+  return status;
 }
 
 /*===========================================================================*
@@ -1264,46 +1228,51 @@ int do_fi(message *m_ptr)
  *===========================================================================*/
 static int check_request(struct rs_start *rs_start)
 {
-  /* Verify scheduling parameters */
-  if (rs_start->rss_scheduler != KERNEL && 
-	(rs_start->rss_scheduler < 0 || 
-	rs_start->rss_scheduler > LAST_SPECIAL_PROC_NR)) {
-	printf("RS: check_request: invalid scheduler %d\n", 
-		rs_start->rss_scheduler);
-	return EINVAL;
-  }
-  if (rs_start->rss_priority >= NR_SCHED_QUEUES) {
-	printf("RS: check_request: priority %u out of range\n", 
-		rs_start->rss_priority);
-	return EINVAL;
-  }
-  if (rs_start->rss_quantum <= 0) {
-	printf("RS: check_request: quantum %u out of range\n", 
-		rs_start->rss_quantum);
-	return EINVAL;
-  }
+    if (rs_start->rss_scheduler != KERNEL &&
+        (rs_start->rss_scheduler < 0 ||
+         rs_start->rss_scheduler > LAST_SPECIAL_PROC_NR)) {
+        printf("RS: check_request: invalid scheduler %d\n",
+            rs_start->rss_scheduler);
+        return EINVAL;
+    }
 
-  if (rs_start->rss_cpu == RS_CPU_BSP)
-	  rs_start->rss_cpu = machine.bsp_id;
-  else if (rs_start->rss_cpu == RS_CPU_DEFAULT) {
-	  /* keep the default value */
-  } else if (rs_start->rss_cpu < 0)
-	  return EINVAL;
-  else if (rs_start->rss_cpu > machine.processors_count) {
-	  printf("RS: cpu number %d out of range 0-%d, using BSP\n",
-			  rs_start->rss_cpu, machine.processors_count);
-	  rs_start->rss_cpu = machine.bsp_id;
-  }
+    if (rs_start->rss_priority >= NR_SCHED_QUEUES) {
+        printf("RS: check_request: priority %u out of range\n",
+            rs_start->rss_priority);
+        return EINVAL;
+    }
 
-  /* Verify signal manager. */
-  if (rs_start->rss_sigmgr != SELF && 
-	(rs_start->rss_sigmgr < 0 || 
-	rs_start->rss_sigmgr > LAST_SPECIAL_PROC_NR)) {
-	printf("RS: check_request: invalid signal manager %d\n", 
-		rs_start->rss_sigmgr);
-	return EINVAL;
-  }
+    if (rs_start->rss_quantum <= 0) {
+        printf("RS: check_request: quantum %u out of range\n",
+            rs_start->rss_quantum);
+        return EINVAL;
+    }
 
-  return OK;
+    int requested_cpu = rs_start->rss_cpu;
+
+    if (requested_cpu == RS_CPU_BSP) {
+        rs_start->rss_cpu = machine.bsp_id;
+    } else if (requested_cpu == RS_CPU_DEFAULT) {
+        /* no-op, RS_CPU_DEFAULT is handled elsewhere */
+    } else {
+        if (requested_cpu < 0) {
+            return EINVAL;
+        }
+        if (requested_cpu > machine.processors_count) {
+            printf("RS: cpu number %d out of range 0-%d, using BSP\n",
+                requested_cpu, machine.processors_count);
+            rs_start->rss_cpu = machine.bsp_id;
+        }
+    }
+
+    if (rs_start->rss_sigmgr != SELF &&
+        (rs_start->rss_sigmgr < 0 ||
+         rs_start->rss_sigmgr > LAST_SPECIAL_PROC_NR)) {
+        printf("RS: check_request: invalid signal manager %d\n",
+            rs_start->rss_sigmgr);
+        return EINVAL;
+    }
+
+    return OK;
 }
 
